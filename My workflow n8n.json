@@ -1,0 +1,294 @@
+{
+  "name": "My workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {}
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -224,
+        128
+      ],
+      "id": "24654035-6e8e-403f-80c3-48907ac97c60",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "model": "deepseek-coder:latest",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+      "typeVersion": 1,
+      "position": [
+        416,
+        304
+      ],
+      "id": "0056afbd-155d-409b-bd28-fe4bb8f011cd",
+      "name": "Ollama Chat Model",
+      "credentials": {
+        "ollamaApi": {
+          "id": "b5tcWK7mtcvSOC9m",
+          "name": "Ollama account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const queries = [\n\n`SELECT u.name, o.total\nFROM users u\nLEFT JOIN orders o ON u.id = o.user_id AND o.total > 500\nWHERE u.status = 'active'`,\n\n`SELECT * FROM orders\nORDER BY created_at DESC\nLIMIT 10`,\n\n`SELECT * FROM (\n    SELECT * FROM users ORDER BY created_at DESC\n) AS sorted_users\nWHERE status = 'active'`,\n\n`SELECT u.id, u.name, u.email, u.created_at, o.order_date, SUM(o.total)\nFROM users2 u\nJOIN orders2 o ON u.id = o.user_id\nGROUP BY u.id, u.name, u.email, u.created_at, o.order_date`,\n\n`SELECT DISTINCT u.*\nFROM users u\nJOIN (\n    SELECT user_id, COUNT(*) as cnt\n    FROM orders\n    WHERE total > 100\n    GROUP BY user_id\n) AS rich_orders ON u.id = rich_orders.user_id\nWHERE u.status = 'active'`,\n\n`SELECT u.name, p.product_name\nFROM users u\nCROSS JOIN products p\nWHERE u.id IN (SELECT user_id FROM orders LIMIT 1000)`,\n\n`SELECT u.name, o.total\nFROM users u\nLEFT JOIN orders o ON u.id = o.user_id\nWHERE o.total > 500`,\n\n`SELECT \n    u.name,\n    u.email,\n    (SELECT SUM(o.total) FROM orders o WHERE o.user_id = u.id) as total_spent,\n    (SELECT COUNT(*) FROM orders o WHERE o.user_id = u.id) as order_count,\n    (SELECT COUNT(*) FROM orders o WHERE o.user_id = u.id AND o.total > 500) as big_orders_count\nFROM users u\nWHERE \n    (SELECT SUM(o.total) FROM orders o WHERE o.user_id = u.id) > 100\n    AND u.status = 'active'\nORDER BY \n    (SELECT SUM(o.total) FROM orders o WHERE o.user_id = u.id) DESC`\n\n];\n\nconst randomQuery = queries[Math.floor(Math.random()*queries.length)];\n\nreturn [\n{\njson:{\nsql: randomQuery\n}\n}\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -80,
+        128
+      ],
+      "id": "c9750531-83fb-4f7e-bf4c-8b6874a1b7e7",
+      "name": "Generate SQL"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "EXPLAIN ANALYZE {{$json[\"sql\"]}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        80,
+        128
+      ],
+      "id": "dcfe64cc-2607-4fc7-97f4-312471b1c0b2",
+      "name": "EXPLAIN ANALYZE",
+      "credentials": {
+        "postgres": {
+          "id": "hg7isRypQLJRJlSt",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const sql = $node[\"Generate SQL\"].json.sql;\nconst plan = JSON.stringify($json);\n\nreturn [{\njson:{\nprompt: `\nROLE:\nYou are a PostgreSQL query optimizer.\n\nIMPORTANT:\nYou are NOT allowed to output anything except the specified format.\n\nINPUT:\nSQL:\n${sql}\n\nPLAN:\n${plan}\n\nTASK:\n- Optimize the query\n- Suggest indexes\n\nHARD CONSTRAINTS:\n- ALWAYS return OPTIMIZED_SQL\n- If no optimization is possible, return the original query\n- Preserve exact semantics\n- Do NOT add/remove columns or tables\n- No explanations outside EXPLANATION block\n\nOUTPUT FORMAT (MANDATORY, NO DEVIATION):\n\nOPTIMIZED_SQL:\n<single SQL query, no comments, no markdown, no backticks>\n\nINDEXES:\n<CREATE INDEX statements or NONE>\n\nEXPLANATION:\n- <max 10 words>\n- <max 10 words>\n- <max 10 words>\n\nFORBIDDEN:\n- Any text before OPTIMIZED_SQL\n- Any text after EXPLANATION\n- Markdown \n- Phrases like \"The query is\", \"Execution plan shows\", etc.\n`\n}\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        128
+      ],
+      "id": "c5cffaee-01b8-420f-9667-5fd3960e4e2e",
+      "name": "Build prompt"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.prompt }}",
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        416,
+        128
+      ],
+      "id": "2dc96c42-b305-49ec-98ce-536330ce6d79",
+      "name": "LLM"
+    },
+    {
+      "parameters": {
+        "jsCode": "const text = $input.first().json.text; \n\nconst sql = text.match(/OPTIMIZED_SQL:\\n([\\s\\S]*?)\\n\\nINDEXES:/)?.[1]?.trim();\nreturn [{\njson:{\noptimized_sql: sql\n}\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        704,
+        128
+      ],
+      "id": "2f41feca-ee1a-4e9e-84dd-507cbb131c94",
+      "name": "Extract optimized SQL"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "CREATE INDEX idx_orders_user_total ON orders(user_id, total);\nCREATE INDEX idx_orders_user_big ON orders(user_id) WHERE total > 500;\n\nEXPLAIN ANALYZE {{$json[\"optimized_sql\"].replace(/.*```\\s*([\\s\\S]*?)\\s*```.*/, '$1')}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        880,
+        128
+      ],
+      "id": "106e98dd-54ba-499c-bba5-78ddd559b9af",
+      "name": "Execute optimized SQL",
+      "credentials": {
+        "postgres": {
+          "id": "hg7isRypQLJRJlSt",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{\njson:{\noriginal: $node[\"EXPLAIN ANALYZE\"].json,\noptimized: $node[\"Execute optimized SQL\"].json\n}\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1056,
+        128
+      ],
+      "id": "004ab11f-5957-4076-bc89-efb244fc885b",
+      "name": "Compare performance"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "CREATE TABLE IF NOT EXISTS sql_optimization_log (\n    id SERIAL, \n    original_sql TEXT, \n    optimized_sql TEXT, \n    created_at TIMESTAMP DEFAULT now()\n);\nINSERT INTO sql_optimization_log (original_sql, optimized_sql) \nVALUES (\n    '{{ $node[\"Generate SQL\"].json.sql }}', \n    '{{ $node[\"Extract optimized SQL\"].json.optimized_sql }}'\n);",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1232,
+        128
+      ],
+      "id": "79b9f369-e898-45da-90e5-db688aba23cd",
+      "name": "Save dataset",
+      "credentials": {
+        "postgres": {
+          "id": "hg7isRypQLJRJlSt",
+          "name": "Postgres account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Generate SQL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ollama Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "LLM",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate SQL": {
+      "main": [
+        [
+          {
+            "node": "EXPLAIN ANALYZE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "EXPLAIN ANALYZE": {
+      "main": [
+        [
+          {
+            "node": "Build prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build prompt": {
+      "main": [
+        [
+          {
+            "node": "LLM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM": {
+      "main": [
+        [
+          {
+            "node": "Extract optimized SQL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract optimized SQL": {
+      "main": [
+        [
+          {
+            "node": "Execute optimized SQL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute optimized SQL": {
+      "main": [
+        [
+          {
+            "node": "Compare performance",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compare performance": {
+      "main": [
+        [
+          {
+            "node": "Save dataset",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "1a6606f5-3b7c-478b-a1db-92cffdffdf89",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "c223b1464cf6f97c2fb5c6f123e3f98bc679dadde5154ccdf9c019e394c6e710"
+  },
+  "id": "mfzaAl0WuqDAKAQD",
+  "tags": [
+    {
+      "updatedAt": "2026-03-07T19:01:51.291Z",
+      "createdAt": "2026-03-07T19:01:51.291Z",
+      "id": "oovFmrlejOKBbtR1",
+      "name": "пп"
+    }
+  ]
+}
